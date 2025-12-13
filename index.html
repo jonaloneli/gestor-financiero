@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gestor Financiero 2026</title>
+    <title>Gestor Financiero</title>
     <style>
         :root {
             --color-primary: #2196F3;
@@ -232,6 +232,19 @@
         .user-info p {
             margin: 0;
             font-size: 14px;
+        }
+
+        .sync-status {
+            font-size: 12px;
+            padding: 5px 10px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 4px;
+            margin-right: 10px;
+        }
+
+        .sync-status.synced {
+            background: rgba(76, 175, 80, 0.3);
+            color: #4CAF50;
         }
 
         .month-selector {
@@ -555,6 +568,11 @@
                 flex-direction: column;
                 gap: 10px;
             }
+
+            .sync-status {
+                margin-right: 0;
+                margin-bottom: 10px;
+            }
         }
     </style>
 </head>
@@ -562,9 +580,10 @@
     <!-- PANTALLA DE LOGIN -->
     <div id="loginScreen" class="login-container">
         <div class="logo-text">
+            <small>JG-APP</small>
         </div>
 
-        <h1>💰 Gestor Financiero 2026</h1>
+        <h1>💰 Gestor Financiero</h1>
         
         <div class="auth-tabs">
             <button class="auth-tab active" type="button" onclick="switchAuthTab('login')">Iniciar Sesión</button>
@@ -617,30 +636,20 @@
         <div class="container">
             <header>
                 <div>
-                    <h1>💰 Gestor Financiero 2026</h1>
+                    <h1>💰 Gestor Financiero <span id="headerYear">2026</span></h1>
                 </div>
                 <div class="user-info">
+                    <div class="sync-status" id="syncStatus">📱 Local</div>
                     <p>👤 <strong id="currentUserName"></strong></p>
                     <button class="btn btn-secondary btn-small" type="button" onclick="logout()">Cerrar Sesión</button>
                 </div>
             </header>
 
             <div class="month-selector">
-                <label for="monthSelect">Selecciona mes:</label>
-                <select id="monthSelect">
-                    <option value="2026-01">Enero 2026</option>
-                    <option value="2026-02">Febrero 2026</option>
-                    <option value="2026-03">Marzo 2026</option>
-                    <option value="2026-04">Abril 2026</option>
-                    <option value="2026-05">Mayo 2026</option>
-                    <option value="2026-06">Junio 2026</option>
-                    <option value="2026-07">Julio 2026</option>
-                    <option value="2026-08">Agosto 2026</option>
-                    <option value="2026-09">Septiembre 2026</option>
-                    <option value="2026-10">Octubre 2026</option>
-                    <option value="2026-11">Noviembre 2026</option>
-                    <option value="2026-12">Diciembre 2026</option>
-                </select>
+                <label for="yearSelect">Año:</label>
+                <select id="yearSelect"></select>
+                <label for="monthSelect">Mes:</label>
+                <select id="monthSelect"></select>
             </div>
 
             <div class="stats-grid">
@@ -735,20 +744,147 @@
         </div>
 
         <footer>
-            <p>&copy; 2026 Jonathan Guevara. Todos los derechos reservados.</p>
+            <p>&copy; 2025-2045 Jonathan Guevara. Todos los derechos reservados.</p>
         </footer>
     </div>
 
     <script>
-        const STORAGE_KEY = 'financialData2026';
-        const SERVER_URL = 'http://localhost:3000';
+        // ========== CONFIGURACIÓN SUPABASE ==========
+        const SUPABASE_URL = 'https://wlqdisjgffpwzdlojrst.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndscWRpc2pnZmZwd3pkbG9qcnN0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU2Mjk0ODQsImV4cCI6MjA4MTIwNTQ4NH0.7StNkxueRmhAc1_IztfBmDjkIhZhVZIyi9actmU_lvI';
+
+        const STORAGE_KEY = 'financialDataMultiYear';
+        const MIN_YEAR = 2026;
+        const MAX_YEAR = 2045;
+        const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
         
         let currentUser = null;
         let currentMonth = new Date().getMonth() + 1;
-        let currentYear = 2026;
+        let currentYear = new Date().getFullYear() > MAX_YEAR ? MAX_YEAR : Math.max(new Date().getFullYear(), MIN_YEAR);
         let selectedExpenseCategory = '';
+        let isSynced = false;
 
-        // ===== FUNCIONES DE AUTENTICACIÓN =====
+        // ========== FUNCIONES SUPABASE ==========
+
+        async function supabaseRequest(method, path, body = null) {
+            const options = {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'apikey': SUPABASE_KEY,
+                    'Authorization': `Bearer ${SUPABASE_KEY}`
+                }
+            };
+
+            if (body) {
+                options.body = JSON.stringify(body);
+            }
+
+            try {
+                const response = await fetch(`${SUPABASE_URL}/rest/v1${path}`, options);
+                if (!response.ok) {
+                    console.error(`Error ${response.status}:`, await response.text());
+                    return null;
+                }
+                return await response.json();
+            } catch (error) {
+                console.error('Error de conexión:', error);
+                return null;
+            }
+        }
+
+        async function loadUserFromSupabase(email) {
+            const result = await supabaseRequest(
+                'GET',
+                `/financial_data?email=eq.${encodeURIComponent(email)}&select=*`
+            );
+            
+            if (result && result.length > 0) {
+                return result[0];
+            }
+            return null;
+        }
+
+        async function saveUserToSupabase(email, name, password) {
+            const result = await supabaseRequest(
+                'POST',
+                '/financial_data',
+                {
+                    email: email,
+                    name: name,
+                    password: password,
+                    data: {}
+                }
+            );
+            
+            return result !== null;
+        }
+
+        async function updateUserDataInSupabase(email, data) {
+            const result = await supabaseRequest(
+                'PATCH',
+                `/financial_data?email=eq.${encodeURIComponent(email)}`,
+                {
+                    data: data,
+                    updated_at: new Date().toISOString()
+                }
+            );
+            
+            return result !== null;
+        }
+
+        async function syncFromSupabase() {
+            if (!currentUser) return false;
+            
+            try {
+                const userRecord = await loadUserFromSupabase(currentUser.email);
+                
+                if (userRecord) {
+                    const allData = getAllUsers();
+                    allData.users[currentUser.email] = {
+                        name: userRecord.name,
+                        password: userRecord.password,
+                        data: userRecord.data || {}
+                    };
+                    
+                    try {
+                        localStorage.setItem(STORAGE_KEY, JSON.stringify(allData));
+                    } catch (e) {
+                        console.error('Error localStorage:', e);
+                    }
+                    
+                    isSynced = true;
+                    updateSyncStatus();
+                    console.log('✅ Datos sincronizados desde Supabase');
+                    return true;
+                }
+            } catch (error) {
+                console.log('⚠️ Supabase no disponible:', error.message);
+            }
+            
+            return false;
+        }
+
+        async function saveToSupabase() {
+            if (!currentUser || !isSynced) return;
+            const data = getUserData();
+            await updateUserDataInSupabase(currentUser.email, data);
+        }
+
+        function updateSyncStatus() {
+            const syncEl = document.getElementById('syncStatus');
+            if (syncEl) {
+                if (isSynced) {
+                    syncEl.textContent = '☁️ Sincronizado';
+                    syncEl.classList.add('synced');
+                } else {
+                    syncEl.textContent = '📱 Local';
+                    syncEl.classList.remove('synced');
+                }
+            }
+        }
+
+        // ===== FUNCIONES DE AUTENTICACIÓN (MEJORADAS) =====
 
         function switchAuthTab(tab) {
             document.querySelectorAll('.auth-tab').forEach(btn => btn.classList.remove('active'));
@@ -778,13 +914,12 @@
         function saveAllData(data) {
             try {
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-                autoSaveToFile(data);
             } catch (e) {
                 console.error('Error al guardar datos:', e);
             }
         }
 
-        function handleRegister(event) {
+        async function handleRegister(event) {
             event.preventDefault();
             
             const name = document.getElementById('registerName').value.trim();
@@ -821,6 +956,13 @@
                 return;
             }
 
+            // Intentar guardar en Supabase primero
+            const savedToSupabase = await saveUserToSupabase(email, name, password);
+            if (savedToSupabase) {
+                console.log('✅ Usuario guardado en Supabase');
+            }
+
+            // Guardar también en localStorage
             allData.users[email] = {
                 name: name,
                 password: password,
@@ -840,40 +982,90 @@
             }, 1500);
         }
 
-        function handleLogin(event) {
+        async function handleLogin(event) {
             event.preventDefault();
             
             const email = document.getElementById('loginEmail').value.trim();
             const password = document.getElementById('loginPassword').value;
             const errorDiv = document.getElementById('loginError');
 
-            errorDiv.innerHTML = '';
+            errorDiv.innerHTML = '<div class="alert alert-success">Verificando datos...</div>';
 
             if (!email || !password) {
                 errorDiv.innerHTML = '<div class="alert alert-error">Por favor, completa todos los campos</div>';
                 return;
             }
 
-            const allData = getAllUsers();
-            const user = allData.users[email];
+            // ⭐ PRIMERO: Intentar obtener del SERVIDOR/SUPABASE
+            let userFromSupabase = null;
+            try {
+                userFromSupabase = await loadUserFromSupabase(email);
+            } catch (err) {
+                console.log('⚠️ Supabase no disponible, buscando en local');
+            }
 
-            if (!user || user.password !== password) {
-                errorDiv.innerHTML = '<div class="alert alert-error">Email o contraseña incorrectos</div>';
+            if (userFromSupabase) {
+                // Usuario encontrado en Supabase
+                if (userFromSupabase.password !== password) {
+                    errorDiv.innerHTML = '<div class="alert alert-error">Contraseña incorrecta</div>';
+                    return;
+                }
+
+                // ✅ Login exitoso desde Supabase
+                currentUser = {
+                    email: email,
+                    name: userFromSupabase.name
+                };
+
+                localStorage.setItem('currentUser', JSON.stringify(currentUser));
+
+                // Guardar en localStorage también para futuro offline
+                const allData = getAllUsers();
+                allData.users[email] = {
+                    name: userFromSupabase.name,
+                    password: password,
+                    data: userFromSupabase.data || {}
+                };
+                saveAllData(allData);
+
+                document.getElementById('currentUserName').textContent = currentUser.name;
+                document.getElementById('loginScreen').style.display = 'none';
+                document.getElementById('appScreen').classList.add('active');
+
+                isSynced = true;
+                updateSyncStatus();
+                console.log('✅ Login exitoso desde Supabase');
+
+                init();
                 return;
             }
 
-            currentUser = {
-                email: email,
-                name: user.name
-            };
+            // ⭐ FALLBACK: Buscar en localStorage local
+            const allData = getAllUsers();
+            const userLocal = allData.users[email];
 
-            localStorage.setItem('currentUser', JSON.stringify(currentUser));
+            if (userLocal && userLocal.password === password) {
+                currentUser = {
+                    email: email,
+                    name: userLocal.name
+                };
 
-            document.getElementById('currentUserName').textContent = currentUser.name;
-            document.getElementById('loginScreen').style.display = 'none';
-            document.getElementById('appScreen').classList.add('active');
+                localStorage.setItem('currentUser', JSON.stringify(currentUser));
+                document.getElementById('currentUserName').textContent = currentUser.name;
+                document.getElementById('loginScreen').style.display = 'none';
+                document.getElementById('appScreen').classList.add('active');
 
-            init();
+                isSynced = false;
+                updateSyncStatus();
+                console.log('⚠️ Login desde localStorage local (offline)');
+
+                init();
+                return;
+            }
+
+            // ❌ Usuario no encontrado en ningún lugar
+            errorDiv.innerHTML = '<div class="alert alert-error">Email o contraseña incorrectos</div>';
+            console.error('❌ Usuario no encontrado');
         }
 
         function logout() {
@@ -906,25 +1098,58 @@
             }
             allData.users[currentUser.email].data = data;
             saveAllData(allData);
+            
+            // Guardar también en Supabase
+            if (isSynced) {
+                saveToSupabase();
+            }
+        }
+
+        function generateYearOptions() {
+            const yearSelect = document.getElementById('yearSelect');
+            for (let year = MIN_YEAR; year <= MAX_YEAR; year++) {
+                const option = document.createElement('option');
+                option.value = year;
+                option.textContent = year;
+                yearSelect.appendChild(option);
+            }
+            yearSelect.value = currentYear;
+        }
+
+        function generateMonthOptions() {
+            const monthSelect = document.getElementById('monthSelect');
+            monthSelect.innerHTML = '';
+            for (let i = 0; i < MONTHS.length; i++) {
+                const option = document.createElement('option');
+                option.value = String(i + 1).padStart(2, '0');
+                option.textContent = `${MONTHS[i]} ${currentYear}`;
+                monthSelect.appendChild(option);
+            }
+            monthSelect.value = String(currentMonth).padStart(2, '0');
         }
 
         function init() {
             const today = new Date();
-            document.getElementById('monthSelect').value = `2026-${String(currentMonth).padStart(2, '0')}`;
+            generateYearOptions();
+            generateMonthOptions();
+            document.getElementById('yearSelect').addEventListener('change', function(e) {
+                currentYear = parseInt(e.target.value);
+                document.getElementById('headerYear').textContent = currentYear;
+                generateMonthOptions();
+                displayTransactions();
+                updateStats();
+            });
+            document.getElementById('monthSelect').addEventListener('change', function(e) {
+                currentMonth = parseInt(e.target.value);
+                displayTransactions();
+                updateStats();
+            });
             document.getElementById('incomeDate').valueAsDate = today;
             document.getElementById('expenseDate').valueAsDate = today;
             
             displayTransactions();
             updateStats();
         }
-
-        document.getElementById('monthSelect').addEventListener('change', function(e) {
-            const [year, month] = e.target.value.split('-');
-            currentYear = parseInt(year);
-            currentMonth = parseInt(month);
-            displayTransactions();
-            updateStats();
-        });
 
         function selectCategory(event) {
             event.preventDefault();
@@ -944,8 +1169,9 @@
             }
 
             const [year, month] = date.split('-');
-            if (parseInt(year) !== 2026) {
-                alert('Solo puedes registrar transacciones del año 2026');
+            const yearInt = parseInt(year);
+            if (yearInt < MIN_YEAR || yearInt > MAX_YEAR) {
+                alert(`Solo puedes registrar transacciones entre ${MIN_YEAR} y ${MAX_YEAR}`);
                 return;
             }
 
@@ -984,8 +1210,9 @@
             }
 
             const [year, month] = date.split('-');
-            if (parseInt(year) !== 2026) {
-                alert('Solo puedes registrar transacciones del año 2026');
+            const yearInt = parseInt(year);
+            if (yearInt < MIN_YEAR || yearInt > MAX_YEAR) {
+                alert(`Solo puedes registrar transacciones entre ${MIN_YEAR} y ${MAX_YEAR}`);
                 return;
             }
 
@@ -1119,15 +1346,6 @@
             URL.revokeObjectURL(url);
         }
 
-        function autoSaveToFile(allData) {
-            const dataStr = JSON.stringify(allData, null, 2);
-            fetch(`${SERVER_URL}/guardar-datos`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: dataStr
-            }).catch(err => console.log('⚠️ Servidor no disponible, datos guardados localmente'));
-        }
-
         function exportToCSV() {
             const data = getUserData();
             let csv = 'Mes,Tipo,Concepto,Categoría,Cantidad,Fecha\n';
@@ -1162,7 +1380,7 @@
             });
 
             const stats = `
-                <h3>📊 Estadísticas Generales del año 2026</h3>
+                <h3>📊 Estadísticas Generales</h3>
                 <ul style="list-style: none; padding: 15px; background: var(--color-bg); border-radius: 6px;">
                     <li><strong>Meses registrados:</strong> ${monthsCount}</li>
                     <li><strong>Ingresos totales:</strong> €${totalIncome.toFixed(2)}</li>
@@ -1183,6 +1401,7 @@
                 document.getElementById('currentUserName').textContent = currentUser.name;
                 document.getElementById('loginScreen').style.display = 'none';
                 document.getElementById('appScreen').classList.add('active');
+                syncFromSupabase();
                 init();
             }
         });
